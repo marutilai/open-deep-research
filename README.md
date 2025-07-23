@@ -1,5 +1,7 @@
 # Open Deep Research
 
+> **Disclaimer**: This is a customized fork of the original [Open Deep Research](https://github.com/langchain-ai/open_deep_research) project by LangChain.
+
 <img width="1388" height="298" alt="full_diagram" src="https://github.com/user-attachments/assets/12a2371b-8be2-4219-9b48-90503eb43c69" />
 
 Deep research has broken out as one of the most popular agent applications. This is a simple, configurable, fully open source deep research agent that works across many model providers, search tools, and MCP servers. 
@@ -174,3 +176,18 @@ The `src/legacy/` folder contains two earlier implementations that provide alter
 - **MCP Support**: Extensive Model Context Protocol integration
 
 See `src/legacy/legacy.md` for detailed documentation, configuration options, and usage examples for both legacy implementations.
+
+## 🔧 Customizations in This Fork
+
+This fork includes the following modifications:
+
+### Key Changes:
+- **Local authentication bypass**: Simplified setup for local development without Supabase
+- **Enhanced error handling**: Better logging and debugging capabilities
+- **Comprehensive .gitignore**: Ready for version control
+- **Documentation updates**: Added research flow documentation in `docs/`
+- **Default search API**: Changed to OpenAI search as default
+
+### Attribution
+Original project: [LangChain Open Deep Research](https://github.com/langchain-ai/open_deep_research)  
+License: Same as original project
