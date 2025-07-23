@@ -1,4 +1,4 @@
-from typing import Annotated, Optional
+from typing import Annotated, Optional, Any, Dict
 from pydantic import BaseModel, Field
 import operator
 from langgraph.graph import MessagesState
@@ -57,6 +57,7 @@ class AgentState(MessagesState):
     raw_notes: Annotated[list[str], override_reducer] = []
     notes: Annotated[list[str], override_reducer] = []
     final_report: str
+    cost_tracking: Optional[Dict[str, Any]] = None
 
 class SupervisorState(TypedDict):
     supervisor_messages: Annotated[list[MessageLikeRepresentation], override_reducer]

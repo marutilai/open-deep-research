@@ -4,6 +4,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import START, END, StateGraph
 from langgraph.types import Command
 import asyncio
+import time
 from typing import Literal
 from open_deep_research.configuration import (
     Configuration, 
@@ -39,14 +40,53 @@ from open_deep_research.utils import (
     get_api_key_for_model,
     get_notes_from_tool_calls
 )
+from open_deep_research.cost_tracker import CostTracker
 
 # Initialize a configurable model that we will use throughout the agent
 configurable_model = init_chat_model(
     configurable_fields=("model", "max_tokens", "api_key"),
 )
 
+# Global cost tracker instance
+cost_tracker = CostTracker()
+
+async def invoke_with_cost_tracking(model, messages, task="", config=None):
+    """Wrapper to track costs for model invocations"""
+    start_time = time.time()
+    
+    # Extract model name from the configured model
+    if hasattr(model, '_config') and hasattr(model._config, 'model'):
+        model_name = model._config.model
+    elif hasattr(model, 'model'):
+        model_name = model.model
+    elif hasattr(model, 'bound') and hasattr(model.bound, 'model'):
+        model_name = model.bound.model
+    else:
+        # Try to extract from config if available
+        if config and isinstance(config, dict) and 'model' in config:
+            model_name = config['model']
+        else:
+            model_name = "unknown"
+    
+    input_tokens = cost_tracker.estimate_messages_tokens(messages if isinstance(messages, list) else [messages], model_name)
+    
+    # Invoke the model
+    response = await model.ainvoke(messages)
+    
+    # Estimate output tokens
+    output_tokens = cost_tracker.estimate_tokens(str(response.content) if hasattr(response, 'content') else str(response), model_name)
+    
+    # Track the cost
+    duration = time.time() - start_time
+    cost_tracker.add_call(model_name, input_tokens, output_tokens, duration, task)
+    
+    return response
+
 async def clarify_with_user(state: AgentState, config: RunnableConfig) -> Command[Literal["write_research_brief", "__end__"]]:
     configurable = Configuration.from_runnable_config(config)
+    # Reset cost tracker for new research session
+    if configurable.enable_cost_tracking:
+        cost_tracker.reset()
     if not configurable.allow_clarification:
         return Command(goto="write_research_brief")
     messages = state["messages"]
@@ -57,7 +97,12 @@ async def clarify_with_user(state: AgentState, config: RunnableConfig) -> Comman
         "tags": ["langsmith:nostream"]
     }
     model = configurable_model.with_structured_output(ClarifyWithUser).with_retry(stop_after_attempt=configurable.max_structured_output_retries).with_config(model_config)
-    response = await model.ainvoke([HumanMessage(content=clarify_with_user_instructions.format(messages=get_buffer_string(messages), date=get_today_str()))])
+    response = await invoke_with_cost_tracking(
+        model,
+        [HumanMessage(content=clarify_with_user_instructions.format(messages=get_buffer_string(messages), date=get_today_str()))],
+        task="clarify_with_user",
+        config=model_config
+    )
     if response.need_clarification:
         return Command(goto=END, update={"messages": [AIMessage(content=response.question)]})
     else:
@@ -73,10 +118,15 @@ async def write_research_brief(state: AgentState, config: RunnableConfig)-> Comm
         "tags": ["langsmith:nostream"]
     }
     research_model = configurable_model.with_structured_output(ResearchQuestion).with_retry(stop_after_attempt=configurable.max_structured_output_retries).with_config(research_model_config)
-    response = await research_model.ainvoke([HumanMessage(content=transform_messages_into_research_topic_prompt.format(
-        messages=get_buffer_string(state.get("messages", [])),
-        date=get_today_str()
-    ))])
+    response = await invoke_with_cost_tracking(
+        research_model,
+        [HumanMessage(content=transform_messages_into_research_topic_prompt.format(
+            messages=get_buffer_string(state.get("messages", [])),
+            date=get_today_str()
+        ))],
+        task="write_research_brief",
+        config=research_model_config
+    )
     return Command(
         goto="research_supervisor", 
         update={
@@ -106,7 +156,12 @@ async def supervisor(state: SupervisorState, config: RunnableConfig) -> Command[
     lead_researcher_tools = [ConductResearch, ResearchComplete]
     research_model = configurable_model.bind_tools(lead_researcher_tools).with_retry(stop_after_attempt=configurable.max_structured_output_retries).with_config(research_model_config)
     supervisor_messages = state.get("supervisor_messages", [])
-    response = await research_model.ainvoke(supervisor_messages)
+    response = await invoke_with_cost_tracking(
+        research_model,
+        supervisor_messages,
+        task="supervisor",
+        config=research_model_config
+    )
     return Command(
         goto="supervisor_tools",
         update={
@@ -208,7 +263,12 @@ async def researcher(state: ResearcherState, config: RunnableConfig) -> Command[
     }
     research_model = configurable_model.bind_tools(tools).with_retry(stop_after_attempt=configurable.max_structured_output_retries).with_config(research_model_config)
     # NOTE: Need to add fault tolerance here.
-    response = await research_model.ainvoke(researcher_messages)
+    response = await invoke_with_cost_tracking(
+        research_model,
+        researcher_messages,
+        task="researcher",
+        config=research_model_config
+    )
     return Command(
         goto="researcher_tools",
         update={
@@ -278,7 +338,17 @@ async def compress_research(state: ResearcherState, config: RunnableConfig):
     researcher_messages.append(HumanMessage(content=compress_research_simple_human_message))
     while synthesis_attempts < 3:
         try:
-            response = await synthesizer_model.ainvoke(researcher_messages)
+            response = await invoke_with_cost_tracking(
+                synthesizer_model,
+                researcher_messages,
+                task="compress_research",
+                config={
+                    "model": configurable.compression_model,
+                    "max_tokens": configurable.compression_model_max_tokens,
+                    "api_key": get_api_key_for_model(configurable.compression_model, config),
+                    "tags": ["langsmith:nostream"]
+                }
+            )
             return {
                 "compressed_research": str(response.content),
                 "raw_notes": ["\n".join([str(m.content) for m in filter_messages(researcher_messages, include_types=["tool", "ai"])])]
@@ -325,10 +395,22 @@ async def final_report_generation(state: AgentState, config: RunnableConfig):
             date=get_today_str()
         )
         try:
-            final_report = await configurable_model.with_config(writer_model_config).ainvoke([HumanMessage(content=final_report_prompt)])
+            final_report = await invoke_with_cost_tracking(
+                configurable_model.with_config(writer_model_config),
+                [HumanMessage(content=final_report_prompt)],
+                task="final_report_generation",
+                config=writer_model_config
+            )
+            # Add cost tracking if enabled
+            cost_summary = None
+            if configurable.enable_cost_tracking:
+                cost_summary = cost_tracker.get_cost_summary(configurable.model_pricing)
+                cost_tracker.print_summary(configurable.model_pricing)
+            
             return {
                 "final_report": final_report.content, 
                 "messages": [final_report],
+                "cost_tracking": cost_summary,
                 **cleared_state
             }
         except Exception as e:
@@ -352,9 +434,16 @@ async def final_report_generation(state: AgentState, config: RunnableConfig):
                     "final_report": f"Error generating final report: {e}",
                     **cleared_state
                 }
+    # Add cost tracking even on error
+    cost_summary = None
+    if configurable.enable_cost_tracking:
+        cost_summary = cost_tracker.get_cost_summary(configurable.model_pricing)
+        cost_tracker.print_summary(configurable.model_pricing)
+    
     return {
         "final_report": "Error generating final report: Maximum retries exceeded",
-        "messages": [final_report],
+        "messages": [AIMessage(content="Error generating final report: Maximum retries exceeded")],
+        "cost_tracking": cost_summary,
         **cleared_state
     }
 

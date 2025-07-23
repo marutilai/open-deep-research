@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Dict
 from langchain_core.runnables import RunnableConfig
 import os
 from enum import Enum
@@ -206,6 +206,52 @@ class Configuration(BaseModel):
             "x_oap_ui_config": {
                 "type": "text",
                 "description": "Any additional instructions to pass along to the Agent regarding the MCP tools that are available to it."
+            }
+        }
+    )
+    
+    # Cost tracking configuration
+    enable_cost_tracking: bool = Field(
+        default=True,
+        metadata={
+            "x_oap_ui_config": {
+                "type": "boolean",
+                "default": True,
+                "description": "Enable tracking and reporting of API costs"
+            }
+        }
+    )
+    
+    # Model pricing per 1M tokens (in USD)
+    model_pricing: Dict[str, Dict[str, float]] = Field(
+        default={
+            # OpenAI models
+            "openai:gpt-4.1": {"input": 2.50, "output": 10.00},
+            "openai:gpt-4.1-mini": {"input": 0.15, "output": 0.60},
+            "openai:gpt-4.1-nano": {"input": 0.075, "output": 0.30},
+            "openai:gpt-4o": {"input": 2.50, "output": 10.00},
+            "openai:gpt-4o-mini": {"input": 0.15, "output": 0.60},
+            "openai:gpt-4": {"input": 30.00, "output": 60.00},
+            "openai:gpt-3.5-turbo": {"input": 0.50, "output": 1.50},
+            
+            # Anthropic models
+            "anthropic:claude-3-opus": {"input": 15.00, "output": 75.00},
+            "anthropic:claude-3-sonnet": {"input": 3.00, "output": 15.00},
+            "anthropic:claude-3-haiku": {"input": 0.25, "output": 1.25},
+            "anthropic:claude-3.5-sonnet": {"input": 3.00, "output": 15.00},
+            "anthropic:claude-3.5-haiku": {"input": 0.80, "output": 4.00},
+            
+            # Google models
+            "google:gemini-1.5-pro": {"input": 1.25, "output": 5.00},
+            "google:gemini-1.5-flash": {"input": 0.075, "output": 0.30},
+            
+            # Default for unknown models
+            "default": {"input": 1.00, "output": 2.00}
+        },
+        metadata={
+            "x_oap_ui_config": {
+                "type": "json",
+                "description": "Model pricing per 1M tokens. Update as prices change."
             }
         }
     )
