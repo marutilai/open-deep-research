@@ -30,8 +30,7 @@ env/
 ENV/
 .env
 .venv/
-scripts/research_env/
-scripts/deepsearch/
+scripts/
 
 # IDE specific files
 .idea/
