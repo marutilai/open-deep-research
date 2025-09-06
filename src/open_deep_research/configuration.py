@@ -232,7 +232,10 @@ class Configuration(BaseModel):
             "openai:gpt-4o": {"input": 2.50, "output": 10.00},
             "openai:gpt-4o-mini": {"input": 0.15, "output": 0.60},
             "openai:gpt-4": {"input": 30.00, "output": 60.00},
-            "openai:gpt-3.5-turbo": {"input": 0.50, "output": 1.50},
+            "gpt-5": {"input": 1.25, "output": 10.00},
+            "gpt-5-mini": {"input": 0.25, "output": 2.00},
+            "gpt-5-nano": {"input": 0.05, "output": 0.40},
+
             
             # Anthropic models
             "anthropic:claude-3-opus": {"input": 15.00, "output": 75.00},
